@@ -131,10 +131,16 @@ Edit `bootstrap/app.php`:
 ```php
 <?php
 
+use Illuminate\Auth\AuthenticationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -151,6 +157,59 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        $exceptions->render(function (ModelNotFoundException $e, Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return apiResponse(
+                    message: 'Data not found.',
+                    success: false,
+                    status: 404,
+                );
+            }
+        });
+
+        $exceptions->render(function (ValidationException $e, Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return apiResponse(
+                    message: 'The given data was invalid.',
+                    success: false,
+                    status: 422,
+                    errors: $e->errors(),
+                );
+            }
+        });
+
+        $exceptions->render(function (AuthenticationException $e, Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return apiResponse(
+                    message: 'Unauthenticated.',
+                    success: false,
+                    status: 401,
+                );
+            }
+        });
+
+        $exceptions->render(function (QueryException $e, Request $request) {
+            if (($request->is('api/*') || $request->expectsJson())
+                && $e->getCode() === '23000'
+                && str_contains((string) $e->getPrevious(), '1451')) {
+                return apiResponse(
+                    message: 'Cannot delete: data is still referenced by other records.',
+                    success: false,
+                    status: 409,
+                );
+            }
+        });
+
+        $exceptions->render(function (Throwable $e, Request $request) {
+            if (($request->is('api/*') || $request->expectsJson()) && !$e instanceof HttpExceptionInterface) {
+                return apiResponse(
+                    message: 'Internal server error.',
+                    success: false,
+                    status: 500,
+                );
+            }
+        });
     })->create();
 ```
 
@@ -158,7 +217,15 @@ return Application::configure(basePath: dirname(__DIR__))
 - `api:` → memberitahu Laravel file `routes/api.php` harus di-load.
 - `apiPrefix: 'api'` → semua route di `api.php` otomatis ber-prefix `/api`.
 - `statefulApi()` → mengaktifkan cookie-based session auth untuk SPA (bagian dari Sanctum). Aman dipasang sejak sekarang.
-- Blok `shouldRenderJsonWhen` sudah ada di default — memastikan request `api/*` mengembalikan JSON error, bukan HTML.
+- `shouldRenderJsonWhen` → memastikan request `api/*` mengembalikan JSON error, bukan HTML.
+- Blok `$exceptions->render(...)` → **menyeragamkan semua error API** ke format `{ success, message, errors }`:
+  - `NotFoundHttpException` / `ModelNotFoundException` (route/record tidak ditemukan) → **404**
+  - `ValidationException` (validasi gagal di luar `ApiRequest`) → **422** + daftar errors
+  - `AuthenticationException` (belum login) → **401**
+  - `QueryException` kode `23000` (FK violation, hapus data yang masih dirujuk) → **409 Conflict** dengan pesan "Cannot delete: data is still referenced by other records."
+  - `Throwable` lain → **500** (fallback), kecuali HTTP exception yang sudah punya kode sendiri
+
+> **Prasyarat**: helper `apiResponse()` harus sudah dibuat (Step 4.9) sebelum baris ini jalan. Kalau dikerjakan berurutan, buat helper dulu lalu back-edit `bootstrap/app.php`.
 
 ### Step 1.5 — Test koneksi
 
@@ -889,7 +956,7 @@ php artisan make:resource ShoeResource
 
 ### Step 4.2 — ApiRequest (Base Class)
 
-Edit `app/Http/Requests/ApiRequest.php` menjadi **abstract** dan tambahkan custom `failedValidation`:
+Edit `app/Http/Requests/ApiRequest.php` menjadi **abstract** dan tambahkan custom `failedValidation` yang memakai helper `apiResponse()`:
 
 ```php
 <?php
@@ -899,7 +966,6 @@ namespace App\Http\Requests;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
-use Illuminate\Http\JsonResponse;
 
 abstract class ApiRequest extends FormRequest
 {
@@ -909,11 +975,12 @@ abstract class ApiRequest extends FormRequest
     protected function failedValidation(Validator $validator)
     {
         throw new HttpResponseException(
-            new JsonResponse([
-                'success' => false,
-                'message' => 'The given data was invalid.',
-                'errors'  => $validator->errors(),
-            ], 422)
+            apiResponse(
+                message: 'The given data was invalid.',
+                success: false,
+                status: 422,
+                errors: $validator->errors(),
+            )
         );
     }
 }
@@ -1655,14 +1722,84 @@ class ShoeController extends Controller
 
 ---
 
+### Step 4.9 — Helper `apiResponse()` (format response konsisten)
+
+Buat file `app/Support/helpers.php`:
+
+```php
+<?php
+
+if (!function_exists('apiResponse')) {
+    function apiResponse(
+        mixed $data = null,
+        string $message = '',
+        bool $success = true,
+        int $status = 200,
+        array $errors = [],
+        array $headers = [],
+    ): \Illuminate\Http\JsonResponse {
+        $body = [
+            'success' => $success,
+            'message' => $message,
+        ];
+
+        if ($success) {
+            $body['data'] = $data;
+        } else {
+            $body['errors'] = $errors;
+        }
+
+        return response()->json($body, $status)->withHeaders($headers);
+    }
+}
+```
+
+Daftarkan di `composer.json` bagian `autoload` → `files`:
+
+```json
+"autoload": {
+    "psr-4": {
+        "App\\": "app/"
+    },
+    "files": [
+        "app/Support/helpers.php"
+    ]
+}
+```
+
+Lalu:
+
+```bash
+composer dump-autoload
+```
+
+**Kenapa helper?** (pola `setResponse()` dari virtue-erm):
+- Semua success response di controller memakai `apiResponse(...)` → struktur `{ success, message, data }` tidak ditulis ulang di tiap controller.
+- Error response (validasi, 404, 401, 500) memakai helper yang sama → format `{ success, message, errors }` konsisten di seluruh API.
+- Format sukses vs error dibedakan otomatis: sukses → key `data`, gagal → key `errors`.
+
+**Pemakaian di controller:**
+
+```php
+// success
+return apiResponse(data: $resource, message: 'Category created successfully.', status: 201);
+
+// error (jarang dipakai manual, biasanya via exception handler)
+return apiResponse(message: 'Cannot delete.', success: false, status: 400, errors: [...]);
+```
+
+---
+
 ## ✅ Checklist Fase 4
 
-- [ ] `ApiRequest` (base class) dibuat abstract + custom `failedValidation`
+- [ ] `ApiRequest` (base class) dibuat abstract + custom `failedValidation` memakai `apiResponse()`
 - [ ] 6 Form Request extends `ApiRequest` + punya `messages()` custom
 - [ ] 3 API Resource
 - [ ] 3 web controller (resource)
 - [ ] 3 API controller (Api\ prefix)
 - [ ] Semua controller pakai service (bukan langsung model)
+- [ ] Semua controller pakai `apiResponse()` (bukan `response()->json` manual)
+- [ ] `bootstrap/app.php` render 404/422/401/500 dengan format `{ success, message, errors }`
 
 ---
 
