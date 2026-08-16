@@ -1335,9 +1335,9 @@ class ShoeResource extends JsonResource
 
 ### Step 4.7 — Web Controllers (pattern dasar, tanpa view)
 
-> Web controller di virtue-erm mengembalikan `Inertia::render(...)`. Karena kita belum pakai Inertia, web controller untuk sekarang mengembalikan JSON juga (format sama, beda middleware nanti). Ini supaya kamu familiar dengan alur controller+service tanpa dibebani frontend.
+> Web controller di virtue-erm mengembalikan `Inertia::render(...)`. Karena kita belum pakai Inertia, **web controller di proyek ini belum dibuat** — bagian ini murni pola referensi supaya kamu familiar dengan alur controller+service tanpa dibebani frontend. Signature service yang dipakai sama persis dengan yang sudah ada (`all()`, `findById()`, `create()`, `update($model)`, `delete($model)`) — bedanya hanya tidak ada `apiResponse()`, cukup langsung return Resource.
 
-`app/Http/Controllers/BrandController.php`:
+`app/Http/Controllers/BrandController.php` (referensi):
 
 ```php
 <?php
@@ -1347,6 +1347,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreBrandRequest;
 use App\Http\Requests\UpdateBrandRequest;
 use App\Http\Resources\BrandResource;
+use App\Models\Brand;
 use App\Services\BrandService;
 
 class BrandController extends Controller
@@ -1360,42 +1361,34 @@ class BrandController extends Controller
 
     public function index()
     {
-        $brands = $this->brandService->all();
-
-        return BrandResource::collection($brands);
+        return BrandResource::collection($this->brandService->all());
     }
 
-    public function show(int $id)
+    public function show(Brand $brand)
     {
-        $brand = $this->brandService->findWithShoes($id);
-
         return new BrandResource($brand);
     }
 
     public function store(StoreBrandRequest $request)
     {
-        $brand = $this->brandService->create($request->validated());
-
-        return new BrandResource($brand);
+        return new BrandResource($this->brandService->create($request->validated()));
     }
 
-    public function update(UpdateBrandRequest $request, int $id)
+    public function update(UpdateBrandRequest $request, Brand $brand)
     {
-        $brand = $this->brandService->update($id, $request->validated());
-
-        return new BrandResource($brand);
+        return new BrandResource($this->brandService->update($brand, $request->validated()));
     }
 
-    public function destroy(int $id)
+    public function destroy(Brand $brand)
     {
-        $this->brandService->delete($id);
+        $this->brandService->delete($brand);
 
         return response()->json(['message' => 'Brand deleted successfully.']);
     }
 }
 ```
 
-`app/Http/Controllers/CategoryController.php`:
+`app/Http/Controllers/CategoryController.php` (referensi):
 
 ```php
 <?php
@@ -1405,6 +1398,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreCategoryRequest;
 use App\Http\Requests\UpdateCategoryRequest;
 use App\Http\Resources\CategoryResource;
+use App\Models\Category;
 use App\Services\CategoryService;
 
 class CategoryController extends Controller
@@ -1421,9 +1415,9 @@ class CategoryController extends Controller
         return CategoryResource::collection($this->categoryService->all());
     }
 
-    public function show(int $id)
+    public function show(Category $category)
     {
-        return new CategoryResource($this->categoryService->findWithShoes($id));
+        return new CategoryResource($category);
     }
 
     public function store(StoreCategoryRequest $request)
@@ -1431,21 +1425,21 @@ class CategoryController extends Controller
         return new CategoryResource($this->categoryService->create($request->validated()));
     }
 
-    public function update(UpdateCategoryRequest $request, int $id)
+    public function update(UpdateCategoryRequest $request, Category $category)
     {
-        return new CategoryResource($this->categoryService->update($id, $request->validated()));
+        return new CategoryResource($this->categoryService->update($category, $request->validated()));
     }
 
-    public function destroy(int $id)
+    public function destroy(Category $category)
     {
-        $this->categoryService->delete($id);
+        $this->categoryService->delete($category);
 
         return response()->json(['message' => 'Category deleted successfully.']);
     }
 }
 ```
 
-`app/Http/Controllers/ShoeController.php`:
+`app/Http/Controllers/ShoeController.php` (referensi):
 
 ```php
 <?php
@@ -1455,6 +1449,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreShoeRequest;
 use App\Http\Requests\UpdateShoeRequest;
 use App\Http\Resources\ShoeResource;
+use App\Models\Shoe;
 use App\Services\ShoeService;
 
 class ShoeController extends Controller
@@ -1468,40 +1463,38 @@ class ShoeController extends Controller
 
     public function index()
     {
-        return ShoeResource::collection($this->shoeService->allWithRelations());
+        return ShoeResource::collection($this->shoeService->all());
     }
 
-    public function show(int $id)
+    public function show(Shoe $shoe)
     {
-        return new ShoeResource($this->shoeService->findWithRelations($id));
+        return new ShoeResource($shoe);
     }
 
     public function store(StoreShoeRequest $request)
     {
-        $shoe = $this->shoeService->create($request->validated());
-
-        return new ShoeResource($shoe->load(['brand', 'category']));
+        return new ShoeResource($this->shoeService->create($request->validated()));
     }
 
-    public function update(UpdateShoeRequest $request, int $id)
+    public function update(UpdateShoeRequest $request, Shoe $shoe)
     {
-        $shoe = $this->shoeService->update($id, $request->validated());
-
-        return new ShoeResource($shoe->load(['brand', 'category']));
+        return new ShoeResource($this->shoeService->update($shoe, $request->validated()));
     }
 
-    public function destroy(int $id)
+    public function destroy(Shoe $shoe)
     {
-        $this->shoeService->delete($id);
+        $this->shoeService->delete($shoe);
 
         return response()->json(['message' => 'Shoe deleted successfully.']);
     }
 }
 ```
 
+> Catatan konsistensi: sama seperti API controller (Step 4.8), parameter `show/update/destroy` memakai **route model binding** (`Brand $brand`, dsb) — cocok untuk PK ULID dan sesuai signature service yang menerima **instance model**. Jika web controller benar-benar dibuat nanti, `index()` bisa ditingkatkan pakai `paginated($request)` dari Fase 7.
+
 ### Step 4.8 — API Controllers
 
-> API controller mengembalikan **response() wrapper standar** agar konsisten untuk klien eksternal. Untuk learning, bentuk JSON sama dengan web controller — perbedaan utamanya nanti di middleware auth.
+> API controller mengembalikan **`apiResponse()`** (Step 4.9) agar format `{ success, message, data }` konsisten untuk klien eksternal. Parameter `{brand}` / `{category}` / `{shoe}` memakai **route model binding** — Laravel otomatis mengisi instance model sesuai ULID di URL, jadi tidak perlu `find()` manual di controller.
 
 `app/Http/Controllers/Api/BrandController.php`:
 
@@ -1514,8 +1507,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreBrandRequest;
 use App\Http\Requests\UpdateBrandRequest;
 use App\Http\Resources\BrandResource;
+use App\Models\Brand;
 use App\Services\BrandService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class BrandController extends Controller
 {
@@ -1526,54 +1521,58 @@ class BrandController extends Controller
         $this->brandService = $brandService;
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $brands = $this->brandService->all();
-
-        return response()->json([
-            'success' => true,
-            'data'    => BrandResource::collection($brands),
-        ]);
+        return apiResponse(
+            data: BrandResource::collection($this->brandService->paginated($request)),
+            message: 'List brands retrieved successfully.',
+        );
     }
 
-    public function show(int $id): JsonResponse
+    public function options(): JsonResponse
     {
-        $brand = $this->brandService->findWithShoes($id);
+        return apiResponse(
+            data: $this->brandService->options(),
+            message: 'Brand options retrieved successfully.',
+        );
+    }
 
-        return response()->json([
-            'success' => true,
-            'data'    => new BrandResource($brand),
-        ]);
+    public function show(Brand $brand): JsonResponse
+    {
+        return apiResponse(
+            data: new BrandResource($brand),
+            message: 'Brand retrieved successfully.',
+        );
     }
 
     public function store(StoreBrandRequest $request): JsonResponse
     {
         $brand = $this->brandService->create($request->validated());
 
-        return response()->json([
-            'success' => true,
-            'data'    => new BrandResource($brand),
-        ], 201);
+        return apiResponse(
+            data: new BrandResource($brand),
+            message: 'Brand created successfully.',
+            status: 201,
+        );
     }
 
-    public function update(UpdateBrandRequest $request, int $id): JsonResponse
+    public function update(UpdateBrandRequest $request, Brand $brand): JsonResponse
     {
-        $brand = $this->brandService->update($id, $request->validated());
+        $brand = $this->brandService->update($brand, $request->validated());
 
-        return response()->json([
-            'success' => true,
-            'data'    => new BrandResource($brand),
-        ]);
+        return apiResponse(
+            data: new BrandResource($brand),
+            message: 'Brand updated successfully.',
+        );
     }
 
-    public function destroy(int $id): JsonResponse
+    public function destroy(Brand $brand): JsonResponse
     {
-        $this->brandService->delete($id);
+        $this->brandService->delete($brand);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Brand deleted successfully.',
-        ]);
+        return apiResponse(
+            message: 'Brand deleted successfully.',
+        );
     }
 }
 ```
@@ -1589,8 +1588,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreCategoryRequest;
 use App\Http\Requests\UpdateCategoryRequest;
 use App\Http\Resources\CategoryResource;
+use App\Models\Category;
 use App\Services\CategoryService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class CategoryController extends Controller
 {
@@ -1601,50 +1602,58 @@ class CategoryController extends Controller
         $this->categoryService = $categoryService;
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        return response()->json([
-            'success' => true,
-            'data'    => CategoryResource::collection($this->categoryService->all()),
-        ]);
+        return apiResponse(
+            data: CategoryResource::collection($this->categoryService->paginated($request)),
+            message: 'List categories retrieved successfully.',
+        );
     }
 
-    public function show(int $id): JsonResponse
+    public function options(): JsonResponse
     {
-        return response()->json([
-            'success' => true,
-            'data'    => new CategoryResource($this->categoryService->findWithShoes($id)),
-        ]);
+        return apiResponse(
+            data: $this->categoryService->options(),
+            message: 'Category options retrieved successfully.',
+        );
+    }
+
+    public function show(Category $category): JsonResponse
+    {
+        return apiResponse(
+            data: new CategoryResource($category),
+            message: 'Category retrieved successfully.',
+        );
     }
 
     public function store(StoreCategoryRequest $request): JsonResponse
     {
         $category = $this->categoryService->create($request->validated());
 
-        return response()->json([
-            'success' => true,
-            'data'    => new CategoryResource($category),
-        ], 201);
+        return apiResponse(
+            data: new CategoryResource($category),
+            message: 'Category created successfully.',
+            status: 201,
+        );
     }
 
-    public function update(UpdateCategoryRequest $request, int $id): JsonResponse
+    public function update(UpdateCategoryRequest $request, Category $category): JsonResponse
     {
-        $category = $this->categoryService->update($id, $request->validated());
+        $category = $this->categoryService->update($category, $request->validated());
 
-        return response()->json([
-            'success' => true,
-            'data'    => new CategoryResource($category),
-        ]);
+        return apiResponse(
+            data: new CategoryResource($category),
+            message: 'Category updated successfully.',
+        );
     }
 
-    public function destroy(int $id): JsonResponse
+    public function destroy(Category $category): JsonResponse
     {
-        $this->categoryService->delete($id);
+        $this->categoryService->delete($category);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Category deleted successfully.',
-        ]);
+        return apiResponse(
+            message: 'Category deleted successfully.',
+        );
     }
 }
 ```
@@ -1660,8 +1669,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreShoeRequest;
 use App\Http\Requests\UpdateShoeRequest;
 use App\Http\Resources\ShoeResource;
+use App\Models\Shoe;
 use App\Services\ShoeService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class ShoeController extends Controller
 {
@@ -1672,53 +1683,55 @@ class ShoeController extends Controller
         $this->shoeService = $shoeService;
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        return response()->json([
-            'success' => true,
-            'data'    => ShoeResource::collection($this->shoeService->allWithRelations()),
-        ]);
+        return apiResponse(
+            data: ShoeResource::collection($this->shoeService->paginated($request)),
+            message: 'List shoes retrieved successfully.',
+        );
     }
 
-    public function show(int $id): JsonResponse
+    public function show(Shoe $shoe): JsonResponse
     {
-        return response()->json([
-            'success' => true,
-            'data'    => new ShoeResource($this->shoeService->findWithRelations($id)),
-        ]);
+        return apiResponse(
+            data: new ShoeResource($shoe),
+            message: 'Shoe retrieved successfully.',
+        );
     }
 
     public function store(StoreShoeRequest $request): JsonResponse
     {
         $shoe = $this->shoeService->create($request->validated());
 
-        return response()->json([
-            'success' => true,
-            'data'    => new ShoeResource($shoe->load(['brand', 'category'])),
-        ], 201);
+        return apiResponse(
+            data: new ShoeResource($shoe),
+            message: 'Shoe created successfully.',
+            status: 201,
+        );
     }
 
-    public function update(UpdateShoeRequest $request, int $id): JsonResponse
+    public function update(UpdateShoeRequest $request, Shoe $shoe): JsonResponse
     {
-        $shoe = $this->shoeService->update($id, $request->validated());
+        $shoe = $this->shoeService->update($shoe, $request->validated());
 
-        return response()->json([
-            'success' => true,
-            'data'    => new ShoeResource($shoe->load(['brand', 'category'])),
-        ]);
+        return apiResponse(
+            data: new ShoeResource($shoe),
+            message: 'Shoe updated successfully.',
+        );
     }
 
-    public function destroy(int $id): JsonResponse
+    public function destroy(Shoe $shoe): JsonResponse
     {
-        $this->shoeService->delete($id);
+        $this->shoeService->delete($shoe);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Shoe deleted successfully.',
-        ]);
+        return apiResponse(
+            message: 'Shoe deleted successfully.',
+        );
     }
 }
 ```
+
+> **Kenapa model binding, bukan `int $id`?** Karena PK-nya ULID (string), signature `show(int $id)` akan menolak ULID. Dengan `show(Brand $brand)` Laravel resolve otomatis dari `{brand}` di route — dan jika ULID tidak ditemukan, `ModelNotFoundException` di-ubah jadi 404 oleh handler di `bootstrap/app.php` (Step 4.9). Service tetap menerima **instance model**, bukan id.
 
 ---
 
@@ -2411,6 +2424,72 @@ curl "http://localhost:8000/api/v1/shoes?sort=price:asc&perPage=10"
 
 ---
 
+### Step 7.7 — Endpoint `options` (dropdown / select)
+
+Dipakai untuk mengisi dropdown form (misalnya select brand atau category di form create/update shoe). Cukup kembalikan `id` + `name` — tidak butuh API Resource karena service sudah memproyeksikan kolomnya.
+
+**1. Method `options()` di service:**
+
+```php
+public function options(): Collection
+{
+    return Category::query()->orderBy('name')->get(['id', 'name']);
+}
+```
+
+- Tidak pakai pagination — datanya kecil (brand/category segelintir).
+- `orderBy('name')` biar dropdown urut alfabet.
+- `get(['id', 'name'])` menghemat data yang dikirim (hanya 2 kolom).
+
+**2. Method `options()` di controller:**
+
+```php
+public function options(): JsonResponse
+{
+    $data = $this->categoryService->options();
+
+    return apiResponse(
+        success: true,
+        message: 'List category untuk dropdown berhasil dimuat.',
+        data: $data
+    );
+}
+```
+
+**3. Route — WAJIB sebelum `apiResource`:**
+
+```php
+Route::get('categories/options', [CategoryController::class, 'options']);
+Route::get('brands/options', [BrandController::class, 'options']);
+
+Route::apiResource('categories', CategoryController::class);
+Route::apiResource('brands', BrandController::class);
+```
+
+> ⚠️ **Gotcha penting:** jika route `options` dideklarasikan SETELAH `apiResource`, maka request `GET /categories/options` akan tertangkap oleh `categories/{category}` — string `options` dicoba di-parse sebagai ULID → gagal → **404**. Urutan deklarasi route sangat berpengaruh.
+
+**4. Test:**
+
+```bash
+curl "http://localhost:8000/api/v1/categories/options"
+curl "http://localhost:8000/api/v1/brands/options"
+```
+
+Contoh respons:
+
+```json
+{
+  "success": true,
+  "message": "List category untuk dropdown berhasil dimuat.",
+  "data": [
+    { "id": "01HZ...", "name": "Casual" },
+    { "id": "01HZ...", "name": "Sneakers" }
+  ]
+}
+```
+
+---
+
 ## ✅ Checklist Fase 7
 
 - [ ] `paginated(Request $request)` di CategoryService (Step 7.1), BrandService (7.5), ShoeService (7.6)
@@ -2419,6 +2498,287 @@ curl "http://localhost:8000/api/v1/shoes?sort=price:asc&perPage=10"
 - [ ] `withQueryString()` di paginate (filter tidak hilang di halaman berikutnya)
 - [ ] `ShoeService::paginated()` eager load `brand` & `category`
 - [ ] curl test: search, sort, perPage, page, sort invalid (brand, category, shoes)
+- [ ] `options()` di CategoryService & BrandService + controller (Step 7.7)
+- [ ] Route `categories/options` & `brands/options` dideklarasikan SEBELUM `apiResource`
+
+---
+
+## FASE 8 — Soft Deletes: Restore & Force Delete
+
+> Tujuan: `DELETE` tidak menghapus data permanen, tapi menandai `deleted_at`. Data bisa di-restore kembali, atau di-force delete (hapus permanen) jika benar-benar mau dibuang. Laravel menyebutnya **Soft Deletes**.
+
+### Step 8.1 — Tambahkan kolom `deleted_at` (migration)
+
+Tabel `brands`, `categories`, `shoes` sudah dibuat di Fase 2 tanpa kolom `deleted_at`. Kita tambahkan lewat migration baru:
+
+```bash
+php artisan make:migration add_soft_deletes_to_brands_categories_and_shoes_tables
+```
+
+Isi file migration:
+
+```php
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('brands', function (Blueprint $table) {
+            $table->softDeletes();
+        });
+
+        Schema::table('categories', function (Blueprint $table) {
+            $table->softDeletes();
+        });
+
+        Schema::table('shoes', function (Blueprint $table) {
+            $table->softDeletes();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('brands', function (Blueprint $table) {
+            $table->dropSoftDeletes();
+        });
+
+        Schema::table('categories', function (Blueprint $table) {
+            $table->dropSoftDeletes();
+        });
+
+        Schema::table('shoes', function (Blueprint $table) {
+            $table->dropSoftDeletes();
+        });
+    }
+};
+```
+
+> **Konsep:** `$table->softDeletes()` menambahkan kolom `deleted_at TIMESTAMP NULL`. Ini **bukan ULID** — tetap kolom timestamp biasa, karena bukan primary key. Migration ini `up` menambah, `down` menghapus kolom (mudah rollback).
+
+Jalankan:
+
+```bash
+php artisan migrate
+```
+
+Verifikasi kolom ada di ketiga tabel:
+
+```bash
+php artisan migrate:status
+# atau cek langsung
+php artisan tinker --execute="print_r(Schema::getColumnListing('brands'));"
+```
+
+### Step 8.2 — Aktifkan trait `SoftDeletes` di model
+
+Tambahkan trait `SoftDeletes` ke Brand, Category, dan Shoe:
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
+
+class Brand extends Model
+{
+    use HasUlids, SoftDeletes, LogsActivity;
+
+    // ... fillable, getActivitylogOptions, shoes() tetap sama
+}
+```
+
+Lakukan hal yang sama di `app/Models/Category.php` dan `app/Models/Shoe.php`.
+
+> **Konsep — apa yang berubah otomatis setelah trait ini aktif:**
+> 1. Semua query default ditambahkan scope global `deleted_at IS NULL` → data terhapus **tidak muncul** di `index`/`show`/relasi.
+> 2. `$model->delete()` tidak lagi menghapus baris, tapi mengisi `deleted_at` (soft delete). **`BrandService::delete()` di Fase 3 tidak perlu diubah sama sekali.**
+> 3. Muncul method baru: `restore()` (kembalikan data) dan `forceDelete()` (hapus permanen).
+> 4. Method bantu query: `withTrashed()` (sertakan yang terhapus) dan `onlyTrashed()` (hanya yang terhapus).
+
+### Step 8.3 — Adjustment `destroy()` agar menjadi soft delete
+
+Kabar baik: **tidak ada perubahan kode** di `destroy()` maupun `delete()` service. Cukup dengan trait di Step 8.2, perilakunya otomatis berubah. Berikut kondisi sebelum & sesudah:
+
+**Kode yang TIDAK diubah** — `BrandService::delete()` (Fase 3) dan `BrandController::destroy()` (Step 4.8):
+
+```php
+// Service (tetap sama)
+public function delete(Brand $brand): void
+{
+    $brand->delete();
+}
+
+// Controller (tetap sama)
+public function destroy(Brand $brand): JsonResponse
+{
+    $this->brandService->delete($brand);
+
+    return apiResponse(
+        message: 'Brand deleted successfully.',
+    );
+}
+```
+
+**Perbandingan perilaku `$brand->delete()`:**
+
+| | Sebelum `SoftDeletes` | Sesudah `SoftDeletes` |
+|---|---|---|
+| Yang terjadi | Baris di-`DELETE` permanen dari DB | Hanya `deleted_at` terisi, baris tetap ada |
+| Data muncul di list `index` | Tidak | Tidak (global scope `deleted_at IS NULL`) |
+| Brand yang punya relasi shoes | Error 409 (FK `restrictOnDelete` + handler QueryException di `bootstrap/app.php`) | **Sukses 200** — baris tidak dihapus, jadi FK tidak dilanggar |
+| Bisa dikembalikan? | Tidak | Ya, via `restore()` |
+
+> ⚠️ **Penting — handler 409 masih relevan untuk force delete.** `forceDelete()` benar-benar menghapus baris, jadi FK `restrictOnDelete` tetap berlaku: **force delete category/brand yang masih punya shoes tetap gagal 409**. Inilah salah satu alasan kenapa soft delete lebih aman untuk data berelasi.
+
+> **Konsep:** Endpoint `DELETE` (destroy) kini = soft delete (aman, bisa rollback). Hapus permanen = endpoint `force` yang baru (Fase 8), dan itulah yang tetap kena constraint FK.
+
+### Step 8.4 — Service: method `restore()` & `forceDelete()`
+
+Tambahkan dua method di tiap service (contoh `BrandService`):
+
+```php
+public function restore(string $id): Brand
+{
+    $brand = Brand::withTrashed()->findOrFail($id);
+    $brand->restore();
+
+    return $brand;
+}
+
+public function forceDelete(string $id): void
+{
+    $brand = Brand::withTrashed()->findOrFail($id);
+    $brand->forceDelete();
+}
+```
+
+> ⚠️ **Kenapa `withTrashed()` dan bukan route model binding?**
+>
+> Model sudah punya global scope `deleted_at IS NULL`. Akibatnya, route model binding biasa (`restore(Brand $brand)`) TIDAK akan menemukan brand yang sudah terhapus → selalu 404. Karena itu untuk restore/forceDelete kita ambil id sebagai **`string`** lalu cari manual dengan `Brand::withTrashed()->findOrFail($id)` — query ini **mengabaikan** scope soft delete, jadi data yang terhapus pun bisa ditemukan.
+
+> **Konsep:** `restore()` mengosongkan `deleted_at`; `forceDelete()` benar-benar menghapus baris dari database (tidak bisa di-restore lagi).
+
+Tambahkan method serupa di `CategoryService` dan `ShoeService`:
+
+```php
+// CategoryService
+public function restore(string $id): Category { ... Category::withTrashed() ... }
+public function forceDelete(string $id): void { ... Category::withTrashed() ... }
+
+// ShoeService
+public function restore(string $id): Shoe { ... Shoe::withTrashed() ... }
+public function forceDelete(string $id): void { ... Shoe::withTrashed() ... }
+```
+
+### Step 8.5 — Controller & Route
+
+Tambahkan method di tiap API controller (contoh `BrandController`):
+
+```php
+public function restore(string $id): JsonResponse
+{
+    $brand = $this->brandService->restore($id);
+
+    return apiResponse(
+        data: new BrandResource($brand),
+        message: 'Brand restored successfully.',
+    );
+}
+
+public function forceDelete(string $id): JsonResponse
+{
+    $this->brandService->forceDelete($id);
+
+    return apiResponse(
+        message: 'Brand permanently deleted successfully.',
+    );
+}
+```
+
+Lakukan hal yang sama di `CategoryController` dan `ShoeController`.
+
+Registrasikan route di `routes/api.php` — taruh di dalam group `v1`:
+
+```php
+Route::prefix('v1')->group(function () {
+    // Options (dropdown) — WAJIB sebelum apiResource
+    Route::get('categories/options', [CategoryController::class, 'options']);
+    Route::get('brands/options', [BrandController::class, 'options']);
+
+    // Soft delete: restore & force delete — pakai {id} string, bukan model binding
+    Route::post('categories/{id}/restore', [CategoryController::class, 'restore']);
+    Route::delete('categories/{id}/force', [CategoryController::class, 'forceDelete']);
+    Route::post('brands/{id}/restore', [BrandController::class, 'restore']);
+    Route::delete('brands/{id}/force', [BrandController::class, 'forceDelete']);
+    Route::post('shoes/{id}/restore', [ShoeController::class, 'restore']);
+    Route::delete('shoes/{id}/force', [ShoeController::class, 'forceDelete']);
+
+    Route::apiResource('categories', CategoryController::class);
+    Route::apiResource('brands', BrandController::class);
+    Route::apiResource('shoes', ShoeController::class);
+});
+```
+
+> **Kenapa `{id}` (string) dan bukan `{brand}`?** Karena controller menerima `string $id` (scalar), Laravel tidak melakukan model binding — cukup meneruskan nilai ULID dari URL. Ini justru yang kita mau: lookup `withTrashed()` dilakukan di service. Parameter route HARUS bernama sama dengan parameter method (`$id`), kalau tidak Laravel error "Missing required parameter".
+
+> **Posisi route tidak masalah di sini** (tidak seperti `options`): `POST brands/{id}/restore` punya 2 segmen + method POST, jadi tidak akan bentrok dengan `apiResource` (`POST brands` = store, `DELETE brands/{brand}` = hapus biasa).
+
+### Step 8.6 — Test dengan curl
+
+```bash
+# 1. Ambil id brand yang ada
+curl "http://localhost:8000/api/v1/brands" | python3 -m json.tool
+
+# 2. Soft delete (hapus "sementara")
+curl -X DELETE "http://localhost:8000/api/v1/brands/<BRAND_ULID>" | python3 -m json.tool
+
+# 3. Data hilang dari list (default scope soft delete)
+curl "http://localhost:8000/api/v1/brands"
+
+# 4. Restore — data kembali
+curl -X POST "http://localhost:8000/api/v1/brands/<BRAND_ULID>/restore" | python3 -m json.tool
+curl "http://localhost:8000/api/v1/brands"   # brand muncul lagi
+
+# 5. Soft delete lagi, lalu force delete (hapus permanen)
+curl -X DELETE "http://localhost:8000/api/v1/brands/<BRAND_ULID>"
+curl -X DELETE "http://localhost:8000/api/v1/brands/<BRAND_ULID>/force" | python3 -m json.tool
+
+# 6. Setelah force delete, restore gagal 404 (baris sudah hilang dari DB)
+curl -X POST "http://localhost:8000/api/v1/brands/<BRAND_ULID>/restore"
+```
+
+Verifikasi di database:
+
+```bash
+php artisan tinker --execute="
+use App\Models\Brand;
+// cek semua termasuk yang terhapus
+foreach (Brand::withTrashed()->get() as \$b) {
+    echo \$b->name . ' => deleted_at: ' . \$b->deleted_at . PHP_EOL;
+}"
+```
+
+## ✅ Checklist Fase 8
+
+- [ ] Migration `add_soft_deletes...` dengan `$table->softDeletes()` untuk brands, categories, shoes (Step 8.1)
+- [ ] `php artisan migrate` jalan & kolom `deleted_at` ada di 3 tabel
+- [ ] Trait `SoftDeletes` dipakai di Brand, Category, Shoe (Step 8.2)
+- [ ] `delete()` lama otomatis jadi soft delete (tanpa ubah kode) — `destroy()` tidak perlu diubah (Step 8.3)
+- [ ] `restore(string $id)` & `forceDelete(string $id)` di 3 service pakai `withTrashed()->findOrFail($id)` (Step 8.4)
+- [ ] Controller punya `restore()` & `forceDelete()` dengan `apiResponse()` (Step 8.5)
+- [ ] Route `{id}/restore` (POST) & `{id}/force` (DELETE) terdaftar untuk 3 modul
+- [ ] curl test: delete → hilang dari list, restore → muncul lagi, force → 404 di restore (Step 8.6)
 
 ---
 
@@ -2433,7 +2793,6 @@ curl "http://localhost:8000/api/v1/shoes?sort=price:asc&perPage=10"
 
 2. **Perbaikan Pola** (setelah paham dasar):
    - `Rule::unique()` untuk cek nama unik brand/category di UpdateRequest
-   - `SoftDeletes` di model (hapus lunak, restore, force delete)
    - `BaseService` untuk menghilangkan duplikasi `paginated()`/`search()` antar service
 
 3. **Belajar Lanjutan dari virtue-erm**:
