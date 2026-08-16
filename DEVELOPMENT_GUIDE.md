@@ -13,6 +13,7 @@ Panduan bertahap membangun aplikasi **Shoe Management** (Brand, Category, Shoe) 
 | Framework | Laravel 13.25 (PHP ^8.3) |
 | Database | SQLite (local) / MySQL (production) |
 | Tabel | `brands`, `categories`, `shoes` + `users` (default) |
+| Primary Key | **ULID** (string, seperti virtue-erm) |
 | CRUD | **Penuh** untuk Brand, Category, Shoe |
 | Service Layer | `BaseService` (abstract) + 1 service per modul |
 | API Auth | **Ditunda** — fokus CRUD dulu, auth menyusul |
@@ -271,8 +272,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('brands', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
+            $table->ulid('id')->primary();
+            $table->string('name', 100)->unique();
             $table->text('description')->nullable();
             $table->timestamps();
         });
@@ -301,9 +302,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('categories', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
-            $table->text('description')->nullable();
+            $table->ulid('id')->primary();
+            $table->string('name', 100)->unique();
             $table->timestamps();
         });
     }
@@ -331,13 +331,19 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('shoes', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('brand_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('category_id')->constrained()->cascadeOnDelete();
-            $table->string('name');
-            $table->string('size')->nullable();
-            $table->decimal('price', 10, 2)->default(0);
-            $table->integer('stock')->default(0);
+            $table->ulid('id')->primary();
+            $table->foreignUlid('category_id')
+                ->constrained(table: 'categories', column: 'id')
+                ->cascadeOnUpdate()
+                ->restrictOnDelete();
+            $table->foreignUlid('brand_id')
+                ->constrained('brands', 'id')
+                ->cascadeOnUpdate()
+                ->restrictOnDelete();
+            $table->string('name', 200);
+            $table->string('size', 50);
+            $table->unsignedBigInteger('price');
+            $table->unsignedInteger('stock')->default(0);
             $table->text('description')->nullable();
             $table->timestamps();
         });
@@ -350,11 +356,17 @@ return new class extends Migration
 };
 ```
 
-**Konsep FK (wajib paham)**:
-- `foreignId('brand_id')` → kolom unsigned bigint `brand_id`
+**Konsep ULID + FK (wajib paham)**:
+- `$table->ulid('id')->primary()` → primary key bertipe **ULID** (string 26 karakter, misal `01HZ5F3G4S...`), bukan auto-increment integer. Sama seperti virtue-erm.
+- `foreignUlid('brand_id')` → kolom string `brand_id` bertipe ULID
 - `->constrained()` → otomatis buat **foreign key** ke kolom `id` tabel `brands`
 - `->cascadeOnDelete()` → hapus brand = semua shoe brand itu ikut terhapus (alternatif: `->restrictOnDelete()` untuk cegah hapus brand yang masih punya shoes)
 - `decimal('price', 10, 2)` → desimal max 10 digit, 2 di belakang koma
+
+**Kenapa ULID?** (alasan virtue-erm memilih ini):
+- ID tidak bisa ditebak/diiterasi dari luar (aman untuk eksposure API, tidak bocor jumlah data).
+- Tetap sortable secara kronologis (mirip auto-increment), beda dengan UUID yang acak.
+- String → aman di URL, tidak bisa di-manipulasi.
 
 ### Step 2.5 — Jalankan migration
 
@@ -372,6 +384,7 @@ php artisan migrate:status   # semua status harus "Ran"
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Spatie\Activitylog\LogOptions;
@@ -379,16 +392,11 @@ use Spatie\Activitylog\Traits\LogsActivity;
 
 class Brand extends Model
 {
-    use LogsActivity;
+    use HasUlids, LogsActivity;
 
     protected $fillable = [
         'name',
         'description',
-    ];
-
-    protected $hidden = [
-        'created_at',
-        'updated_at',
     ];
 
     public function getActivitylogOptions(): LogOptions
@@ -396,7 +404,9 @@ class Brand extends Model
         return LogOptions::defaults()
             ->logOnly(['name', 'description'])
             ->logOnlyDirty()
-            ->dontSubmitEmptyLogs();
+            ->dontSubmitEmptyLogs()
+            ->useLogName('brand')
+            ->setDescriptionForEvent(fn (string $eventName) => "Brand has been {$eventName}");
     }
 
     public function shoes(): HasMany
@@ -415,6 +425,7 @@ class Brand extends Model
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Spatie\Activitylog\LogOptions;
@@ -422,7 +433,7 @@ use Spatie\Activitylog\Traits\LogsActivity;
 
 class Category extends Model
 {
-    use LogsActivity;
+    use HasUlids, LogsActivity;
 
     protected $fillable = [
         'name',
@@ -437,9 +448,11 @@ class Category extends Model
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['name', 'description'])
+            ->logOnly(['name'])
             ->logOnlyDirty()
-            ->dontSubmitEmptyLogs();
+            ->dontSubmitEmptyLogs()
+            ->useLogName('category')
+            ->setDescriptionForEvent(fn (string $eventName) => "Category has been {$eventName}");
     }
 
     public function shoes(): HasMany
@@ -458,6 +471,7 @@ class Category extends Model
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Spatie\Activitylog\LogOptions;
@@ -465,7 +479,7 @@ use Spatie\Activitylog\Traits\LogsActivity;
 
 class Shoe extends Model
 {
-    use LogsActivity;
+    use HasUlids, LogsActivity;
 
     protected $fillable = [
         'brand_id',
@@ -482,17 +496,12 @@ class Shoe extends Model
         'updated_at',
     ];
 
-    protected $casts = [
-        'price' => 'decimal:2',
-        'stock' => 'integer',
-    ];
-
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
             ->logOnly([
-                'brand_id',
                 'category_id',
+                'brand_id',
                 'name',
                 'size',
                 'price',
@@ -500,17 +509,19 @@ class Shoe extends Model
                 'description',
             ])
             ->logOnlyDirty()
-            ->dontSubmitEmptyLogs();
-    }
-
-    public function brand(): BelongsTo
-    {
-        return $this->belongsTo(Brand::class);
+            ->dontSubmitEmptyLogs()
+            ->useLogName('shoe')
+            ->setDescriptionForEvent(fn (string $eventName) => "Shoe has been {$eventName}");
     }
 
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
+    }
+
+    public function brand(): BelongsTo
+    {
+        return $this->belongsTo(Brand::class);
     }
 }
 ```
@@ -1074,8 +1085,8 @@ class StoreShoeRequest extends ApiRequest
     public function rules(): array
     {
         return [
-            'brand_id'    => ['required', 'integer', 'exists:brands,id'],
-            'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'brand_id'    => ['required', 'ulid', 'exists:brands,id'],
+            'category_id' => ['required', 'ulid', 'exists:categories,id'],
             'name'        => ['required', 'string', 'max:255'],
             'size'        => ['nullable', 'string', 'max:20'],
             'price'       => ['required', 'numeric', 'min:0'],
@@ -1088,10 +1099,10 @@ class StoreShoeRequest extends ApiRequest
     {
         return [
             'brand_id.required'    => 'Brand wajib dipilih.',
-            'brand_id.integer'     => 'Brand tidak valid.',
+            'brand_id.ulid'        => 'Brand tidak valid.',
             'brand_id.exists'      => 'Brand yang dipilih tidak ditemukan.',
             'category_id.required' => 'Kategori wajib dipilih.',
-            'category_id.integer'  => 'Kategori tidak valid.',
+            'category_id.ulid'     => 'Kategori tidak valid.',
             'category_id.exists'   => 'Kategori yang dipilih tidak ditemukan.',
             'name.required'        => 'Nama sepatu wajib diisi.',
             'name.string'          => 'Nama sepatu harus berupa teks.',
@@ -1127,8 +1138,8 @@ class UpdateShoeRequest extends ApiRequest
     public function rules(): array
     {
         return [
-            'brand_id'    => ['required', 'integer', 'exists:brands,id'],
-            'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'brand_id'    => ['required', 'ulid', 'exists:brands,id'],
+            'category_id' => ['required', 'ulid', 'exists:categories,id'],
             'name'        => ['required', 'string', 'max:255'],
             'size'        => ['nullable', 'string', 'max:20'],
             'price'       => ['required', 'numeric', 'min:0'],
@@ -1141,10 +1152,10 @@ class UpdateShoeRequest extends ApiRequest
     {
         return [
             'brand_id.required'    => 'Brand wajib dipilih.',
-            'brand_id.integer'     => 'Brand tidak valid.',
+            'brand_id.ulid'        => 'Brand tidak valid.',
             'brand_id.exists'      => 'Brand yang dipilih tidak ditemukan.',
             'category_id.required' => 'Kategori wajib dipilih.',
-            'category_id.integer'  => 'Kategori tidak valid.',
+            'category_id.ulid'     => 'Kategori tidak valid.',
             'category_id.exists'   => 'Kategori yang dipilih tidak ditemukan.',
             'name.required'        => 'Nama sepatu wajib diisi.',
             'name.string'          => 'Nama sepatu harus berupa teks.',
@@ -1737,6 +1748,17 @@ Harus muncul semua route API dan web.
 
 ### Step 5.4 — Test CRUD dengan curl
 
+> **Penting**: Karena primary key bertipe **ULID**, semua `id` di URL & body request bukan angka `1`, melainkan string ULID 26 karakter (misal `01HZ5F3G4S...`). Ambil id asli dari database dulu:
+>
+> ```bash
+> php artisan tinker
+> Brand::first()->id;       // misal "01HZ5F3G4S..."
+> Category::first()->id;
+> Shoe::first()->id;
+> ```
+>
+> Ganti nilai-nilai di bawah ini dengan ULID yang kamu dapat.
+
 ```bash
 # Buat brand
 curl -X POST http://localhost:8000/api/v1/brands \
@@ -1750,26 +1772,26 @@ curl -X POST http://localhost:8000/api/v1/categories \
   -H "Content-Type: application/json" \
   -d '{"name":"Running","description":"Sepatu lari"}'
 
-# Buat shoe
+# Buat shoe (ganti <BRAND_ULID> & <CATEGORY_ULID> dengan id asli)
 curl -X POST http://localhost:8000/api/v1/shoes \
   -H "Accept: application/json" \
   -H "Content-Type: application/json" \
-  -d '{"brand_id":1,"category_id":1,"name":"Air Max 90","size":"42","price":1500000,"stock":10,"description":"Sepatu lari premium"}'
+  -d '{"brand_id":"<BRAND_ULID>","category_id":"<CATEGORY_ULID>","name":"Air Max 90","size":"42","price":1500000,"stock":10,"description":"Sepatu lari premium"}'
 
 # List shoes (harus include relasi brand & category)
 curl http://localhost:8000/api/v1/shoes
 
-# Show detail
-curl http://localhost:8000/api/v1/shoes/1
+# Show detail (ganti <SHOE_ULID> dengan id asli)
+curl http://localhost:8000/api/v1/shoes/<SHOE_ULID>
 
 # Update
-curl -X PATCH http://localhost:8000/api/v1/shoes/1 \
+curl -X PATCH http://localhost:8000/api/v1/shoes/<SHOE_ULID> \
   -H "Accept: application/json" \
   -H "Content-Type: application/json" \
-  -d '{"brand_id":1,"category_id":1,"name":"Air Max 97","size":"42","price":1700000,"stock":8}'
+  -d '{"brand_id":"<BRAND_ULID>","category_id":"<CATEGORY_ULID>","name":"Air Max 97","size":"42","price":1700000,"stock":8}'
 
 # Delete
-curl -X DELETE http://localhost:8000/api/v1/shoes/1
+curl -X DELETE http://localhost:8000/api/v1/shoes/<SHOE_ULID>
 ```
 
 **Cek activity log** setelah operasi CRUD di atas:
@@ -2041,7 +2063,7 @@ composer test
 
 ## ⚠️ Catatan Penting (Junior Developer)
 
-1. **Jangan pakai `id` integer asli untuk external exposure selamanya** — virtue-erm pakai ULID. Untuk learning ID biasa OK, tapi ingat untuk produksi harus di-upgrade ke UUID/ULID.
+1. **Primary key ULID sudah dipakai dari Fase 2** — tidak ada auto-increment integer. Jangan pernah ganti kembali ke `$table->id()` tanpa alasan kuat (keamanan & konsistensi dengan virtue-erm).
 2. **Selalu pakai `->with()` eager loading** saat akses relasi — hindari N+1 query.
 3. **Selalu bungkus operasi multi-record** dalam `DB::transaction()`.
 4. **Service layer** = controller tipis, logic di service. Jangan pindah seluruh logika ke controller.
