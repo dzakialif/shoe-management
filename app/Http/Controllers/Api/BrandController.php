@@ -9,6 +9,7 @@ use App\Http\Resources\BrandResource;
 use App\Models\Brand;
 use App\Services\BrandService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class BrandController extends Controller
 {
@@ -19,10 +20,10 @@ class BrandController extends Controller
         $this->brandService = $brandService;
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         return apiResponse(
-            data: BrandResource::collection($this->brandService->all()),
+            data: BrandResource::collection($this->brandService->paginated($request)),
             message: 'List brands retrieved successfully.',
         );
     }

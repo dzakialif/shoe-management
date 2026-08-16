@@ -9,6 +9,7 @@ use App\Http\Resources\CategoryResource;
 use App\Models\Category;
 use App\Services\CategoryService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class CategoryController extends Controller
 {
@@ -19,10 +20,10 @@ class CategoryController extends Controller
         $this->categoryService = $categoryService;
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         return apiResponse(
-            data: CategoryResource::collection($this->categoryService->all()),
+            data: CategoryResource::collection($this->categoryService->paginated($request)),
             message: 'List categories retrieved successfully.',
         );
     }

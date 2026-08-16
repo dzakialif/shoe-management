@@ -9,6 +9,7 @@ use App\Http\Resources\ShoeResource;
 use App\Models\Shoe;
 use App\Services\ShoeService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class ShoeController extends Controller
 {
@@ -19,10 +20,10 @@ class ShoeController extends Controller
         $this->shoeService = $shoeService;
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         return apiResponse(
-            data: ShoeResource::collection($this->shoeService->all()),
+            data: ShoeResource::collection($this->shoeService->paginated($request)),
             message: 'List shoes retrieved successfully.',
         );
     }

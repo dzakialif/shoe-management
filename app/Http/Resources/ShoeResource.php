@@ -17,14 +17,8 @@ class ShoeResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
-            'category' => [
-                'id' => $this->category?->id,
-                'name' => $this->category?->name,
-            ],
-            'brand' => [
-                'id' => $this->brand?->id,
-                'name' => $this->brand?->name,
-            ],
+            'category' => $this->category?->id,
+            'brand' => $this->brand?->id,
             'size' => $this->size,
             'price' => $this->price,
             'stock' => $this->stock,
