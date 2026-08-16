@@ -2175,6 +2175,253 @@ composer test
 
 ---
 
+## FASE 7 — Search, Sort & Pagination (index endpoint)
+
+> Benchmark: pola `TaxonomyService` di virtue-erm. Di sana query params dibaca dari `Request`, disusun dengan Eloquent `when()`, lalu di-`paginate()`. Kita adaptasi tanpa `BaseService`.
+
+### Konsep
+
+Endpoint `index` kita dukung query params opsional:
+
+```
+GET /api/v1/categories?search=kaos&sort=name:asc&perPage=15
+```
+
+| Param | Default | Fungsi |
+|---|---|---|
+| `search` | `''` | Cari `LIKE %keyword%` di kolom tertentu |
+| `sort` | `id:desc` | Format `kolom:arah`. Arah: `asc`/`desc` |
+| `perPage` | `10` | Jumlah data per halaman (dibatasi bawah `>= 1`) |
+
+### Step 7.1 — Method `paginated()` di Service
+
+Tambah method baru (biarkan `all()` tetap ada). `app/Services/CategoryService.php`:
+
+```php
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Request;
+
+public function paginated(Request $request): LengthAwarePaginator
+{
+    $search  = $request->input('search');
+    $sort    = $request->input('sort', 'id:desc');
+    $perPage = max($request->integer('perPage', 10), 1);
+
+    [$sortBy, $sortDir] = explode(':', $sort . ':desc');
+    $sortDir            = in_array($sortDir, ['asc', 'desc'], true) ? $sortDir : 'asc';
+
+    return Category::query()
+        ->when($search, function (Builder $query) use ($search) {
+            $query->where(function (Builder $q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+            });
+        })
+        ->orderBy($sortBy, $sortDir)
+        ->paginate($perPage)
+        ->withQueryString();
+}
+```
+
+**Penjelasan**:
+- `when($search, ...)` → jika `search` kosong, blok itu dilewati (ini pola virtue-erm, `TaxonomyService::buildFilteredQuery()`).
+- `where(fn($q) => ...)` + `orWhere` → bungkus pencarian multi-kolom dalam group, supaya tidak bentrok dengan kondisi lain.
+- `explode(':', $sort . ':desc')` → ambil `[kolom, arah]`. Menambahkan `:desc` di belakang membuat input seperti `sort=name` (tanpa arah) tetap aman — persis teknik `getPaginatedTanstack()` di virtue-erm.
+- `max(..., 1)` → clamp `perPage` minimal 1 (di virtue-erm pakai helper `clamp()`).
+- `withQueryString()` → **penting**: link pagination (next/prev) otomatis membawa `?search=...&sort=...` sehingga halaman 2 dst tidak kehilangan filter.
+
+### Step 7.2 — Update Controller `index()`
+
+`app/Http/Controllers/Api/CategoryController.php`:
+
+```php
+use Illuminate\Http\Request;
+
+public function index(Request $request): JsonResponse
+{
+    return apiResponse(
+        data: CategoryResource::collection($this->categoryService->paginated($request)),
+        message: 'List categories retrieved successfully.',
+    );
+}
+```
+
+> Catatan: `CategoryResource::collection($paginator)` otomatis mengambil `.data` dari paginator. Struktur response menjadi:
+> `{ success, message, data: { data: [...], current_page, last_page, total, per_page, links, ... } }`.
+
+### Step 7.3 — Sort Whitelist (WAJIB, keamanan)
+
+Jangan pernah `orderBy($request->input('sort'))` mentah — nama kolom tidak bisa di-escape Eloquent, jadi berisiko SQL injection / error jika user kirim `sort=id;DROP TABLE`. Tambahkan whitelist:
+
+```php
+private const SORTABLE = ['id', 'name', 'created_at', 'updated_at'];
+
+// ganti baris orderBy:
+$sortBy = in_array($sortBy, self::SORTABLE, true) ? $sortBy : 'id';
+```
+
+> Di virtue-erm ini "diserahkan" ke frontend TanStack yang hanya mengirim kolom visible. Untuk API publik, whitelist wajib.
+
+### Step 7.4 — Test dengan curl
+
+```bash
+# Semua (default perPage 10)
+curl "http://localhost:8000/api/v1/categories"
+
+# Search nama
+curl "http://localhost:8000/api/v1/categories?search=kaos"
+
+# Sort name ascending, 5 per halaman
+curl "http://localhost:8000/api/v1/categories?sort=name:asc&perPage=5"
+
+# Halaman 2 (link pagination otomatis bawa query string)
+curl "http://localhost:8000/api/v1/categories?sort=name:asc&perPage=5&page=2"
+
+# Sort invalid → fallback ke 'id' (karena whitelist)
+curl "http://localhost:8000/api/v1/categories?sort=nama_kolom_salah:asc"
+```
+
+**Cek di response**:
+- Ada `data.data` (array item), `data.total`, `data.per_page`, `data.current_page`, `data.last_page`, `data.links`.
+- Link `next`/`prev` menyertakan `search` & `sort` (efek `withQueryString()`).
+
+### Step 7.5 — Modul Brand
+
+Pola sama dengan Category. `app/Services/BrandService.php`:
+
+```php
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Request;
+
+private const SORTABLE = ['id', 'name', 'created_at', 'updated_at'];
+
+public function paginated(Request $request): LengthAwarePaginator
+{
+    $search  = $request->input('search');
+    $sort    = $request->input('sort', 'id:desc');
+    $perPage = max($request->integer('perPage', 10), 1);
+
+    [$sortBy, $sortDir] = explode(':', $sort . ':desc');
+    $sortDir            = in_array($sortDir, ['asc', 'desc'], true) ? $sortDir : 'asc';
+    $sortBy             = in_array($sortBy, self::SORTABLE, true) ? $sortBy : 'id';
+
+    return Brand::query()
+        ->when($search, function (Builder $query) use ($search) {
+            $query->where(function (Builder $q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+            });
+        })
+        ->orderBy($sortBy, $sortDir)
+        ->paginate($perPage)
+        ->withQueryString();
+}
+```
+
+`app/Http/Controllers/Api/BrandController.php`:
+
+```php
+use Illuminate\Http\Request;
+
+public function index(Request $request): JsonResponse
+{
+    return apiResponse(
+        data: BrandResource::collection($this->brandService->paginated($request)),
+        message: 'List brands retrieved successfully.',
+    );
+}
+```
+
+Test:
+
+```bash
+curl "http://localhost:8000/api/v1/brands?search=nike&sort=name:asc&perPage=5"
+```
+
+### Step 7.6 — Modul Shoe (dengan relasi)
+
+Shoe beda karena bisa dicari lewat **relasi brand/category** dan butuh **eager load**. `app/Services/ShoeService.php`:
+
+```php
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Request;
+
+private const SORTABLE = ['id', 'name', 'price', 'stock', 'created_at', 'updated_at'];
+
+public function paginated(Request $request): LengthAwarePaginator
+{
+    $search  = $request->input('search');
+    $sort    = $request->input('sort', 'id:desc');
+    $perPage = max($request->integer('perPage', 10), 1);
+
+    [$sortBy, $sortDir] = explode(':', $sort . ':desc');
+    $sortDir            = in_array($sortDir, ['asc', 'desc'], true) ? $sortDir : 'asc';
+    $sortBy             = in_array($sortBy, self::SORTABLE, true) ? $sortBy : 'id';
+
+    return Shoe::query()
+        ->with(['brand', 'category'])          // ← eager load, hindari N+1 di resource
+        ->when($search, function (Builder $query) use ($search) {
+            $query->where(function (Builder $q) use ($search) {
+                $q->where('shoes.name', 'like', "%{$search}%")
+                  ->orWhere('shoes.description', 'like', "%{$search}%")
+                  ->orWhereHas('brand', fn ($b) => $b->where('name', 'like', "%{$search}%"))
+                  ->orWhereHas('category', fn ($c) => $c->where('name', 'like', "%{$search}%"));
+            });
+        })
+        ->orderBy($sortBy, $sortDir)
+        ->paginate($perPage)
+        ->withQueryString();
+}
+```
+
+`app/Http/Controllers/Api/ShoeController.php`:
+
+```php
+use Illuminate\Http\Request;
+
+public function index(Request $request): JsonResponse
+{
+    return apiResponse(
+        data: ShoeResource::collection($this->shoeService->paginated($request)),
+        message: 'List shoes retrieved successfully.',
+    );
+}
+```
+
+**Penjelasan tambahan (khusus Shoe)**:
+- `->with(['brand', 'category'])` → wajib. `ShoeResource` mengakses `$this->brand` dan `$this->category` per item; tanpa eager load, list N item = 1 + 2N query (N+1).
+- `orWhereHas('brand', ...)` → cari shoe yang nama brand-nya cocok (`JOIN` relasi). Nama tabel `shoes.name` diprefix karena di dalam group multi-`orWhere` bisa ambigu saat ada relasi.
+- `SORTABLE` Shoe menambahkan `price` & `stock` — kolom yang masuk akal untuk disortir di konteks sepatu.
+
+Test:
+
+```bash
+# Cari shoe dengan nama brand
+curl "http://localhost:8000/api/v1/shoes?search=nike"
+
+# Cari shoe dengan nama category
+curl "http://localhost:8000/api/v1/shoes?search=running"
+
+# Sort harga termurah, 10 per halaman
+curl "http://localhost:8000/api/v1/shoes?sort=price:asc&perPage=10"
+```
+
+---
+
+## ✅ Checklist Fase 7
+
+- [ ] `paginated(Request $request)` di CategoryService (Step 7.1), BrandService (7.5), ShoeService (7.6)
+- [ ] `index()` controller membaca query params & membungkus paginator
+- [ ] Sort whitelist aktif di ketiga service (input invalid → fallback `id`)
+- [ ] `withQueryString()` di paginate (filter tidak hilang di halaman berikutnya)
+- [ ] `ShoeService::paginated()` eager load `brand` & `category`
+- [ ] curl test: search, sort, perPage, page, sort invalid (brand, category, shoes)
+
+---
+
 ## 🔮 Roadmap Berikutnya (Setelah CRUD Beres)
 
 1. **Implementasi Auth** (`laravel/sanctum` sudah terpasang):
@@ -2187,8 +2434,7 @@ composer test
 2. **Perbaikan Pola** (setelah paham dasar):
    - `Rule::unique()` untuk cek nama unik brand/category di UpdateRequest
    - `SoftDeletes` di model (hapus lunak, restore, force delete)
-   - Pagination di `index()` (mirip `paginate()` di virtue-erm)
-   - `BaseService` tambah method `paginate()`, `search()`
+   - `BaseService` untuk menghilangkan duplikasi `paginated()`/`search()` antar service
 
 3. **Belajar Lanjutan dari virtue-erm**:
    - Global scope (`HasSuperAdminGlobalScope`)
