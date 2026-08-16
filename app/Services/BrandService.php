@@ -41,6 +41,12 @@ class BrandService
         return Brand::all();
     }
 
+    // get id + name (untuk dropdown / options)
+    public function options(): Collection
+    {
+        return Brand::orderBy('name')->get(['id', 'name']);
+    }
+
     // find by id
     public function findById(string $id): Brand
     {

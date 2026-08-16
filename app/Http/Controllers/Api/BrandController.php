@@ -28,6 +28,14 @@ class BrandController extends Controller
         );
     }
 
+    public function options(): JsonResponse
+    {
+        return apiResponse(
+            data: $this->brandService->options(),
+            message: 'Brand options retrieved successfully.',
+        );
+    }
+
     public function show(Brand $brand): JsonResponse
     {
         return apiResponse(

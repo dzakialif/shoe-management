@@ -40,6 +40,12 @@ class CategoryService
         return Category::all();
     }
 
+    // get id + name (untuk dropdown / options)
+    public function options(): Collection
+    {
+        return Category::orderBy('name')->get(['id', 'name']);
+    }
+
     // find by id
     public function findById(string $id): Category
     {

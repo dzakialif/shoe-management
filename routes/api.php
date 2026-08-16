@@ -10,6 +10,10 @@ Route::get('/ping', function () {
 });
 
 Route::prefix('v1')->group(function () {
+    // Options (dropdown) — WAJIB sebelum apiResource agar "options" tidak tertangkap sebagai {category}/{brand}
+    Route::get('categories/options', [CategoryController::class, 'options']);
+    Route::get('brands/options', [BrandController::class, 'options']);
+
     Route::apiResource('categories', CategoryController::class);
     Route::apiResource('brands', BrandController::class);
     Route::apiResource('shoes', ShoeController::class);

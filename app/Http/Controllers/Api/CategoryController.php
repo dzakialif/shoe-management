@@ -28,6 +28,14 @@ class CategoryController extends Controller
         );
     }
 
+    public function options(): JsonResponse
+    {
+        return apiResponse(
+            data: $this->categoryService->options(),
+            message: 'Category options retrieved successfully.',
+        );
+    }
+
     public function show(Category $category): JsonResponse
     {
         return apiResponse(
